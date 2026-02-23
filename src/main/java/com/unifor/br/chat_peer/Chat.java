@@ -1,6 +1,7 @@
 package com.unifor.br.chat_peer;
 
 import com.unifor.br.chat_peer.Helpers.CommandHandler;
+import com.unifor.br.chat_peer.Helpers.MessageLogger;
 import com.unifor.br.chat_peer.Helpers.UIHelper;
 
 import java.io.BufferedReader;
@@ -20,14 +21,18 @@ public class Chat {
     private List<Socket> connections = new ArrayList<>();
     private CommandHandler cmdHandler;
     private UIHelper uiHelper;
+    private MessageLogger logger;
+    private volatile boolean running = true; // Flag para controlar threads
 
     public Chat(String userName, int port){
         this.userName = userName;
         this.uiHelper = new UIHelper();
         this.cmdHandler = new CommandHandler(this); // Passa a referência do Chat
+
         try {
             this.serverSocket = new ServerSocket(port);
-            // Não mostra mais aqui - será mostrado no painel inicial
+            this.logger = new MessageLogger(userName, port);
+
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -49,9 +54,10 @@ public class Chat {
         try {
             BufferedReader userInput = new BufferedReader(
                     new InputStreamReader(System.in));
-            while (true){
+            while (running){
 
                     String mensagem = userInput.readLine();
+                    if (mensagem == null) break; // EOF ou stream fechado
 
                     // Limpar a linha anterior (remove o eco do que foi digitado)
                     System.out.print("\033[1A"); // Move cursor 1 linha para cima
@@ -63,16 +69,22 @@ public class Chat {
                         String feedback = cmdHandler.handleCommand(mensagem);
                         if (feedback != null) {
                             System.out.println(uiHelper.formatSystemMessage(feedback));
+                            // Log mensagens de sistema
+                            logger.logMessage("SISTEMA", feedback);
                         }
                     } else {
                         // Mostrar mensagem localmente (VOCÊ: ...)
                         System.out.println(uiHelper.formatLocalMessage(mensagem));
+                        // Log da mensagem enviada (com nome real do usuário)
+                        logger.logMessage(userName, mensagem);
                         // Enviar para peers
                         broadcastMessage(mensagem);
                     }
             }
         } catch (IOException e) {
-            throw new RuntimeException(e);
+            if (running) { // Só mostra erro se não for shutdown intencional
+                throw new RuntimeException(e);
+            }
         }
     }
 
@@ -90,13 +102,15 @@ public class Chat {
     }
 
     private void listenForConnections() {
-        while (true){
+        while (running){
             try {
                 Socket socket = serverSocket.accept();
                 connections.add(socket);
                 new Thread(()-> handleConection(socket)).start();
             } catch (IOException e) {
-                throw new RuntimeException(e);
+                if (running) { // Só mostra erro se não for shutdown intencional
+                    throw new RuntimeException(e);
+                }
             }
         }
     }
@@ -106,22 +120,26 @@ public class Chat {
             BufferedReader in = new BufferedReader(
                     new InputStreamReader(socket.getInputStream()));
             String mensagem;
-            while ((mensagem = in.readLine())!=null){
+            while (running && (mensagem = in.readLine())!=null){
                 // Parsear "Nome :mensagem" e formatar com cor
                 String[] parts = mensagem.split(" :", 2);
                 if (parts.length == 2) {
                     String peerName = parts[0];
                     String content = parts[1];
                     System.out.println(uiHelper.formatRemoteMessage(peerName, content));
+                    // Log da mensagem recebida
+                    logger.logMessage(peerName, content);
                 } else {
                     // Fallback se formato inesperado
                     System.out.println(mensagem);
+                    logger.logMessage("DESCONHECIDO", mensagem);
                 }
             }
         } catch (IOException e) {
-            throw new RuntimeException(e);
+            if (running) { // Só mostra erro se não for shutdown intencional
+                System.err.println("[ERRO] Conexão perdida: " + e.getMessage());
+            }
         }
-
     }
 
 
@@ -140,6 +158,52 @@ public class Chat {
         } catch (IOException e) {
             uiHelper.showConnectionError(e.getMessage());
         }
+    }
+
+    /**
+     * Encerra o chat de forma segura.
+     * Fecha todas as conexões, logger e termina o programa.
+     */
+    public void shutdown() {
+        System.out.println(uiHelper.formatSystemMessage("\n[SISTEMA] Encerrando chat..."));
+
+        // Para todas as threads
+        running = false;
+
+        // Envia mensagem de despedida para todos os peers
+        try {
+            broadcastMessage("*** Saiu do chat ***");
+        } catch (Exception e) {
+            // Ignora erros ao enviar despedida
+        }
+
+        // Fecha todas as conexões com peers
+        for (Socket socket : connections) {
+            try {
+                socket.close();
+            } catch (IOException e) {
+                // Ignora erros ao fechar
+            }
+        }
+
+        // Fecha o servidor
+        try {
+            if (serverSocket != null && !serverSocket.isClosed()) {
+                serverSocket.close();
+            }
+        } catch (IOException e) {
+            // Ignora erros ao fechar
+        }
+
+        // Fecha o logger (já tem log de encerramento no close())
+        if (logger != null) {
+            logger.close();
+        }
+
+        System.out.println(uiHelper.formatSystemMessage("[SISTEMA] Encerrado com sucesso. Até logo!"));
+
+        // Termina o programa
+        System.exit(0);
     }
 
     public static void main(String[] args) {

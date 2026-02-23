@@ -75,9 +75,12 @@ public class CommandHandler {
     }
 
     /**
-     * Processa o comando /exit (será implementado na Task #4)
+     * Processa o comando /exit - encerra o chat de forma segura
      */
     private String handleExit() {
-        return "[SISTEMA] Comando /exit ainda não implementado (Task #4)";
+        // Chama o método de shutdown do Chat (que cuida de tudo)
+        chat.shutdown();
+        // Nunca chega aqui (shutdown chama System.exit)
+        return null;
     }
 }

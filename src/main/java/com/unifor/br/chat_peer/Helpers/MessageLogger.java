@@ -21,6 +21,7 @@ public class MessageLogger {
 
     private String sessionFile;
     private BufferedWriter writer;
+    private boolean closed = false;
 
     /**
      * Cria um novo logger de sessão.
