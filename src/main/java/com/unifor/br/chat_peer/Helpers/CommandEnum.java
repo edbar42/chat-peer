@@ -3,6 +3,9 @@ package com.unifor.br.chat_peer.Helpers;
 /**
  * Enum que define todos os comandos disponíveis no chat.
  * Cada comando tem: nome, sintaxe de uso e descrição.
+ *
+ * @author Eduardo Barroso
+ * @version 1.0
  */
 public enum CommandEnum {
 

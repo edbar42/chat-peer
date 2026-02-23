@@ -9,12 +9,10 @@ import java.util.Map;
  */
 public class UIHelper {
 
-    // ANSI Color Codes
     public static final String RESET = "\033[0m";
     public static final String GRAY = "\033[90m";
     public static final String BOLD = "\033[1m";
 
-    // Cores disponíveis para peers
     private static final String[] PEER_COLORS = {
         "\033[31m", // RED
         "\033[32m", // GREEN
@@ -54,7 +52,6 @@ public class UIHelper {
         System.out.println("─────────────────────────────────────────");
         System.out.println();
 
-        // Mostrar help
         System.out.println(CommandEnum.generateHelp());
         System.out.println();
         System.out.println("─────────────────────────────────────────");

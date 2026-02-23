@@ -3,39 +3,45 @@ package com.unifor.br.chat_peer.Helpers;
 import com.unifor.br.chat_peer.Chat;
 
 /**
- * Processa comandos do usuário e retorna feedback para o Chat.
- * Comandos começam com "/" e são executados localmente (não são broadcast).
+ * Processa comandos do usuário no formato "/comando [args]".
+ * Comandos são executados localmente e não enviados como mensagens.
+ *
+ * @author Eduardo Barroso
+ * @version 1.0
  */
 public class CommandHandler {
 
-    private Chat chat;
+    private final Chat chat;
 
+    /**
+     * Construtor do handler de comandos.
+     *
+     * @param chat Instância do chat para executar ações
+     */
     public CommandHandler(Chat chat) {
         this.chat = chat;
     }
 
     /**
-     * Processa um comando e retorna mensagem de feedback (ou null se não houver).
-     * @param command O comando completo (ex: "/connect localhost 5000")
-     * @return Mensagem de feedback para exibir localmente, ou null
+     * Processa um comando e retorna feedback.
+     *
+     * @param command Comando completo (ex: "/connect localhost 5000")
+     * @return Mensagem de feedback, ou null se não houver
      */
     public String handleCommand(String command) {
         if (command == null || command.isEmpty()) {
             return "[SISTEMA] Comando vazio";
         }
 
-        // Remove a barra "/" e divide em partes
         String[] parts = command.substring(1).split(" ");
         String commandName = parts[0];
 
-        // Busca o comando na enum
         CommandEnum cmd = CommandEnum.fromString(commandName);
 
         if (cmd == null) {
             return String.format("[SISTEMA] Comando '/%s' desconhecido. Digite /help para ver os comandos disponíveis.", commandName);
         }
 
-        // Processa o comando usando a enum
         switch (cmd) {
             case CONNECT:
                 return handleConnect(parts);
@@ -52,7 +58,10 @@ public class CommandHandler {
     }
 
     /**
-     * Processa o comando /connect [host] [porta]
+     * Conecta a outro peer.
+     *
+     * @param parts Argumentos do comando [comando, host, porta]
+     * @return Mensagem de erro, ou null se sucesso
      */
     private String handleConnect(String[] parts) {
         if (parts.length != 3) {
@@ -63,11 +72,8 @@ public class CommandHandler {
             String host = parts[1];
             int port = Integer.parseInt(parts[2]);
 
-            // Chama o método público do Chat
-            // (connectionToPeer já exibe as mensagens de status)
             chat.connectionToPeer(host, port);
-
-            return null; // Não retorna mensagem (já foi exibida em connectionToPeer)
+            return null;
 
         } catch (NumberFormatException e) {
             return "[SISTEMA] Erro: a porta deve ser um número válido";
@@ -75,12 +81,12 @@ public class CommandHandler {
     }
 
     /**
-     * Processa o comando /exit - encerra o chat de forma segura
+     * Encerra o chat de forma segura.
+     *
+     * @return null (o programa termina antes de retornar)
      */
     private String handleExit() {
-        // Chama o método de shutdown do Chat (que cuida de tudo)
         chat.shutdown();
-        // Nunca chega aqui (shutdown chama System.exit)
         return null;
     }
 }

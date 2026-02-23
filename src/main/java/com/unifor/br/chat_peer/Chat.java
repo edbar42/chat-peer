@@ -14,6 +14,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Scanner;
 
+/**
+ * Sistema de chat P2P (peer-to-peer) descentralizado.
+ * Permite comunicação entre múltiplos usuários sem servidor central.
+ */
 public class Chat {
 
     private String userName;
@@ -22,138 +26,185 @@ public class Chat {
     private CommandHandler cmdHandler;
     private UIHelper uiHelper;
     private MessageLogger logger;
-    private volatile boolean running = true; // Flag para controlar threads
+    private volatile boolean running = true;
 
+    /**
+     * Construtor do chat P2P.
+     *
+     * @param userName Nome do usuário desta sessão
+     * @param port Porta para escutar conexões de entrada
+     * @throws RuntimeException se não conseguir criar o servidor
+     */
     public Chat(String userName, int port){
         this.userName = userName;
         this.uiHelper = new UIHelper();
-        this.cmdHandler = new CommandHandler(this); // Passa a referência do Chat
+        this.cmdHandler = new CommandHandler(this);
 
         try {
             this.serverSocket = new ServerSocket(port);
             this.logger = new MessageLogger(userName, port);
-
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
     }
 
+    /**
+     * Retorna a porta em que o servidor está escutando.
+     *
+     * @return Porta do servidor
+     */
     public int getPort() {
         return serverSocket.getLocalPort();
     }
 
+    /**
+     * Inicia o chat, exibindo painel inicial e iniciando threads de comunicação.
+     */
     public void start(){
-        // Mostrar painel inicial
         uiHelper.showWelcomePanel(userName, getPort());
 
-        new  Thread(this::listenForConnections).start();
-        new Thread(this::listenForUserinput).start();
+        new Thread(this::listenForConnections, "ConnectionListener").start();
+        new Thread(this::listenForUserInput, "UserInputListener").start();
     }
 
-    private void listenForUserinput() {
+    /**
+     * Thread que escuta entrada do usuário (mensagens e comandos).
+     */
+    private void listenForUserInput() {
         try {
             BufferedReader userInput = new BufferedReader(
                     new InputStreamReader(System.in));
+
             while (running){
+                String mensagem = userInput.readLine();
+                if (mensagem == null) break;
 
-                    String mensagem = userInput.readLine();
-                    if (mensagem == null) break; // EOF ou stream fechado
+                clearEchoLine();
 
-                    // Limpar a linha anterior (remove o eco do que foi digitado)
-                    System.out.print("\033[1A"); // Move cursor 1 linha para cima
-                    System.out.print("\033[2K"); // Limpa a linha
-                    System.out.print("\r");      // Move cursor para o início
-
-                    if (mensagem.startsWith("/")) {
-                        // Processa comando e exibe feedback
-                        String feedback = cmdHandler.handleCommand(mensagem);
-                        if (feedback != null) {
-                            System.out.println(uiHelper.formatSystemMessage(feedback));
-                            // Log mensagens de sistema
-                            logger.logMessage("SISTEMA", feedback);
-                        }
-                    } else {
-                        // Mostrar mensagem localmente (VOCÊ: ...)
-                        System.out.println(uiHelper.formatLocalMessage(mensagem));
-                        // Log da mensagem enviada (com nome real do usuário)
-                        logger.logMessage(userName, mensagem);
-                        // Enviar para peers
-                        broadcastMessage(mensagem);
-                    }
+                if (mensagem.startsWith("/")) {
+                    processCommand(mensagem);
+                } else {
+                    sendMessage(mensagem);
+                }
             }
         } catch (IOException e) {
-            if (running) { // Só mostra erro se não for shutdown intencional
+            if (running) {
                 throw new RuntimeException(e);
             }
         }
     }
 
+    /**
+     * Remove eco da linha digitada usando códigos ANSI.
+     */
+    private void clearEchoLine() {
+        System.out.print("\033[1A\033[2K\r");
+        System.out.flush();
+    }
+
+    /**
+     * Processa comando digitado pelo usuário.
+     *
+     * @param command Comando a processar (ex: "/help")
+     */
+    private void processCommand(String command) {
+        String feedback = cmdHandler.handleCommand(command);
+        if (feedback != null) {
+            System.out.println(uiHelper.formatSystemMessage(feedback));
+            logger.logMessage("SISTEMA", feedback);
+        }
+    }
+
+    /**
+     * Envia mensagem para todos os peers conectados.
+     *
+     * @param mensagem Conteúdo da mensagem
+     */
+    private void sendMessage(String mensagem) {
+        System.out.println(uiHelper.formatLocalMessage(mensagem));
+        logger.logMessage(userName, mensagem);
+        broadcastMessage(mensagem);
+    }
+
+    /**
+     * Transmite mensagem para todos os peers conectados.
+     *
+     * @param mensagem Mensagem a enviar
+     */
     private void broadcastMessage(String mensagem) {
         for (Socket socket: connections){
             try {
-                PrintWriter out =
-                        new PrintWriter(socket.getOutputStream(),true);
+                PrintWriter out = new PrintWriter(socket.getOutputStream(),true);
                 out.println(userName +" :" +mensagem);
-
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
         }
     }
 
+    /**
+     * Thread que escuta novas conexões de entrada.
+     */
     private void listenForConnections() {
         while (running){
             try {
                 Socket socket = serverSocket.accept();
                 connections.add(socket);
-                new Thread(()-> handleConection(socket)).start();
+                new Thread(() -> handleConnection(socket), "PeerHandler").start();
             } catch (IOException e) {
-                if (running) { // Só mostra erro se não for shutdown intencional
+                if (running) {
                     throw new RuntimeException(e);
                 }
             }
         }
     }
 
-    private void handleConection(Socket socket) {
+    /**
+     * Gerencia comunicação com um peer específico.
+     *
+     * @param socket Conexão com o peer
+     */
+    private void handleConnection(Socket socket) {
         try {
             BufferedReader in = new BufferedReader(
                     new InputStreamReader(socket.getInputStream()));
             String mensagem;
+
             while (running && (mensagem = in.readLine())!=null){
-                // Parsear "Nome :mensagem" e formatar com cor
                 String[] parts = mensagem.split(" :", 2);
+
                 if (parts.length == 2) {
                     String peerName = parts[0];
                     String content = parts[1];
                     System.out.println(uiHelper.formatRemoteMessage(peerName, content));
-                    // Log da mensagem recebida
                     logger.logMessage(peerName, content);
                 } else {
-                    // Fallback se formato inesperado
                     System.out.println(mensagem);
                     logger.logMessage("DESCONHECIDO", mensagem);
                 }
             }
         } catch (IOException e) {
-            if (running) { // Só mostra erro se não for shutdown intencional
+            if (running) {
                 System.err.println("[ERRO] Conexão perdida: " + e.getMessage());
             }
         }
     }
 
-
+    /**
+     * Conecta a outro peer da rede.
+     *
+     * @param host Endereço IP ou hostname do peer
+     * @param port Porta do peer
+     */
     public void connectionToPeer(String host, int port){
-        // Mostrar "Conectando..." ANTES de tentar
         System.out.println(uiHelper.formatSystemMessage(
             String.format("[SISTEMA] Conectando a %s:%d...", host, port)));
 
         try {
             Socket socket = new Socket(host,port);
             connections.add(socket);
-            new Thread(() -> handleConection(socket)).start();
+            new Thread(() -> handleConnection(socket), "PeerHandler").start();
 
-            // Mostrar "Conectado" DEPOIS de conectar
             uiHelper.showConnectionMessage(host, port);
         } catch (IOException e) {
             uiHelper.showConnectionError(e.getMessage());
@@ -162,52 +213,49 @@ public class Chat {
 
     /**
      * Encerra o chat de forma segura.
-     * Fecha todas as conexões, logger e termina o programa.
+     * Fecha todas as conexões, salva logs e termina o programa.
      */
     public void shutdown() {
         System.out.println(uiHelper.formatSystemMessage("\n[SISTEMA] Encerrando chat..."));
 
-        // Para todas as threads
         running = false;
 
-        // Envia mensagem de despedida para todos os peers
         try {
             broadcastMessage("*** Saiu do chat ***");
         } catch (Exception e) {
-            // Ignora erros ao enviar despedida
+            // Ignora erros
         }
 
-        // Fecha todas as conexões com peers
         for (Socket socket : connections) {
             try {
                 socket.close();
             } catch (IOException e) {
-                // Ignora erros ao fechar
+                // Ignora erros
             }
         }
 
-        // Fecha o servidor
         try {
             if (serverSocket != null && !serverSocket.isClosed()) {
                 serverSocket.close();
             }
         } catch (IOException e) {
-            // Ignora erros ao fechar
+            // Ignora erros
         }
 
-        // Fecha o logger (já tem log de encerramento no close())
         if (logger != null) {
             logger.close();
         }
 
         System.out.println(uiHelper.formatSystemMessage("[SISTEMA] Encerrado com sucesso. Até logo!"));
-
-        // Termina o programa
         System.exit(0);
     }
 
+    /**
+     * Ponto de entrada do programa.
+     *
+     * @param args Argumentos da linha de comando (não utilizados)
+     */
     public static void main(String[] args) {
-
         Scanner scanner = new Scanner(System.in);
 
         System.out.println("Digite o nome do usuario: ");
